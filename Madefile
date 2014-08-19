@@ -1,0 +1,74 @@
+# Copyright 2014 Eric Culp
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+MAKEHTTP_PORT ?= 8080
+
+define MAKEHTTP
+(use-modules
+  (web server)
+  (web response)
+  (web request)
+  (web uri)
+  (ice-9 popen))
+
+(define (copy-port p1 p2)
+  (let ((c (read-char p1)))
+    (if (eof-object? c) '()
+      (begin
+        (write-char c p2)
+        (copy-port p1 p2)))))
+
+(define (port-body port)
+  (lambda (rport) (begin
+    (copy-port port rport))
+    (close-port port)))
+
+(define (log-request r)
+  (begin
+    (display (string-join (list
+      (symbol->string (request-method r))
+      "URI:" (uri->string (request-uri r)))))
+    (newline)))
+
+;; run-rule takes the path of a url as a rule to execute. Then it invokes make for that rule and
+;; sends the output back as a response.
+(define (run-rule request request-body)
+  (let* ((path (uri-path (request-uri request)))
+         (rule (substring path 1))) ; remove leading slash
+    (begin
+      (log-request request)
+      (values '() (port-body (open-pipe* OPEN_READ
+        (gmk-expand "$$(MAKE)") "-f" (gmk-expand "$$(firstword $$(MAKEFILE_LIST))") "MAKEHTTP_NO_SERVER=1" rule))))))
+
+(define (make-http-start)
+  (run-server run-rule 'http
+    (list
+      #:port (string->number (gmk-expand "$$(MAKEHTTP_PORT)")))))
+
+#f
+endef
+
+$(guile $(MAKEHTTP))
+
+define make-http-start-content
+ifneq ($$(MAKEHTTP_NO_SERVER),1)
+$$(guile (make-http-start))
+$$(exit)
+endif
+endef
+
+make-http-start = $(eval $(make-http-start-content))
+
+# vim: set ft=make :
